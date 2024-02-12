@@ -9,7 +9,6 @@ Every model has generate, forward functions that we can use. The model.generate(
 (https://github.com/huggingface/transformers/blob/3e93dd295b5343557a83bc07b0b2ea64c926f9b4/src/transformers/generation/utils.py#L1452)depending on which it can update/process the generation accordingly!
 '''
 from transformers import (
-   AutoTokenizer, 
    LlamaForCausalLM, 
    LlamaTokenizerFast
 )
@@ -23,10 +22,16 @@ from torch.utils.data import DataLoader
 import numpy as np
 import time
 import sys
+import random 
+
+random.seed(42)
+torch.manual_seed(42)
 
 def swa_attention():
+    """
+    This function replaces vanilla attention with SWA, we call it before finetuning
+    """
     print("SWA Attention done!")
-    #### REPLACE THE VANILLA ATTENTION WITH SWA before finetuning!
     # useful to pass extra parameters
     wrapper_function = partial(replaced_mask, window_size=3)
     # Override the original function
@@ -36,22 +41,16 @@ checkpoint = str(sys.argv[1])
 swa_attention_flag = int(sys.argv[2])
 do_sample_flag = int(sys.argv[3])
 
-# Original model!
-# checkpoint = '/hdd4/zoo/llama2/llama2-7b-chat-hf'
-
-# Finetuned model!
-# checkpoint = 'llama-2-7b-finetune-swa-5'
-
 tokenizer = LlamaTokenizerFast.from_pretrained(checkpoint)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 batch_size = 1
 
-### Evaluate the model with Billsum dataset!
+# Evaluate the model with Billsum dataset!
 billsum = load_dataset("billsum", split="ca_test")
 
-# testing with a smaller subset! (so increased test set!!)
-billsum = billsum.train_test_split(test_size=0.99, seed=42)
+# testing with a smaller subset!
+billsum = billsum.train_test_split(test_size=0.9, seed=42)
 print("Data loaded!")
 
 # prefix = f"""
@@ -84,7 +83,6 @@ print("Inputs created!")
 model = LlamaForCausalLM.from_pretrained(checkpoint, torch_dtype=torch.float16)
 device = 'cuda:0'
 
-# Comment this for vanilla attention performance!
 if swa_attention_flag == 1:
    swa_attention()
 
