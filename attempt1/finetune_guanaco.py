@@ -1,14 +1,20 @@
+import types
+from typing import Callable, Optional
 from modeling_llama import _make_causal_mask as replaced_mask
 import transformers.models.llama.modeling_llama as llama_module
 from functools import partial
+import time
+import os
 import torch
 from datasets import load_dataset
 from transformers import (
+    AutoModelForCausalLM,
     LlamaForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
     TrainingArguments,
     pipeline,
+    logging,
 )
 from peft import LoraConfig
 from trl import SFTTrainer
@@ -17,9 +23,11 @@ import logging
 
 def testing_eg(checkpoint):
     prompt = "Who is Leonardo Da Vinci?"
+    # TODO: Currently I think the testing pipeline will use the vanilla-att! modify it! 
     pipe = pipeline(task="text-generation", model=checkpoint, tokenizer=tokenizer, max_length=200)
     result = pipe(f"<s>[INST] {prompt} [/INST]")
     print(result[0]['generated_text'])
+
 
 def see_logs():
     log_dir = "results/runs"
@@ -36,19 +44,6 @@ def swa_attention():
     # Override the original function
     llama_module._make_causal_mask = wrapper_function
 
-prefix = "Summarize the following bill. Focus your summary on the most important aspects of the bill. You do not have to summarize everything. Particularly focus on questions related to appropriation and the effects and impacts of the bill. However, you do not need to go into complex details, it is acceptable to provide ranges. Use active verbs to describe the bill, like 'amends' or 'changes'. Do not use ambivalent verbs like 'proposes' or 'suggests.'"
-
-def preprocess_function(examples):
-   inputs = [prefix + doc for doc in examples['text']]
-   model_inputs = tokenizer(inputs, truncation=True, padding=True,
-                              max_length=1024)
-   
-   labels = tokenizer(text_target=examples["summary"], padding=True,
-                        max_length=512, truncation=True)
-
-   model_inputs["labels"] = labels['input_ids']
-   return model_inputs
-
 # Using the chat version helps to debug easily with test input!!
 checkpoint = '/hdd4/zoo/llama2/llama2-7b-chat-hf'
 
@@ -57,14 +52,11 @@ tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
-# Finetune on Billsum dataset!
-billsum_dataset = "billsum"
+# Finetune on Guanaco dataset
+guanaco_dataset = "mlabonne/guanaco-llama2-1k"
 no_epochs = 5
-new_model = f"llama-2-7b-finetune-swa-billsum-{no_epochs}"
-dataset = load_dataset(billsum_dataset, split="ca_test")
-
-billsum = dataset.train_test_split(test_size=0.2)
-tokenized_billsum = billsum.map(preprocess_function, batched=True)
+new_model = f"llama-2-7b-finetune-swa-{no_epochs}"
+dataset = load_dataset(guanaco_dataset, split="train")
 
 compute_dtype = getattr(torch, "float16")
 
@@ -81,8 +73,7 @@ model = LlamaForCausalLM.from_pretrained(
     quantization_config=quant_config, # load the model using quantization config
     device_map='cuda:0'
 )
-# for training, we shouldn't use KV-cache, as it won't make sense; 
-# we pass parallel inputs from same sentence
+# for training, we shouldn't use KV-cache, as it won't make sense
 model.config.use_cache = False
 # no tensor parallalism
 model.config.pretraining_tp = 1
@@ -123,7 +114,7 @@ training_params = TrainingArguments(
 # finetune using SFTTrainer class!
 trainer = SFTTrainer(
     model=model,
-    train_dataset=tokenized_billsum['train'],
+    train_dataset=dataset,
     peft_config=peft_params,
     dataset_text_field="text",
     max_seq_length=None,
@@ -142,6 +133,6 @@ trainer.tokenizer.save_pretrained(new_model)
 # Logging!!
 # see_logs()
 
-# testing on one random input! Just for debugging purpuse
+# For debugging purpuse
 # testing_eg(checkpoint)
 # testing_eg(new_model)
