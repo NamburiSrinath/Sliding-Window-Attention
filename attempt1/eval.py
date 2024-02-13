@@ -80,8 +80,12 @@ train_dataloader = DataLoader(tokenized_billsum['train'],
 
 print("Inputs created!")
 
-model = LlamaForCausalLM.from_pretrained(checkpoint, torch_dtype=torch.float16)
-device = 'cuda:0'
+model = LlamaForCausalLM.from_pretrained(checkpoint, torch_dtype=torch.float16, 
+                                          low_cpu_mem_usage=True)
+
+# Single GPU
+device="cuda"
+model.to(device)
 
 if swa_attention_flag == 1:
    swa_attention()
@@ -151,6 +155,9 @@ for batch in train_dataloader:
       print("-"*100)
 
       print(results)
+      del input_ids
+      del attn_masks
+      torch.cuda.empty_cache()
       a += 1 
 
 print(f"Rouge 1, 2, L and Lsum are: {rouge1}, {rouge2}, {rougeL}, {rougeLsum}")
